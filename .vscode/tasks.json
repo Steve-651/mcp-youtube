@@ -2,6 +2,21 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "cleanup",
+            "type": "shell",
+            "command": "powershell",
+            "args": ["-ExecutionPolicy", "Bypass", "-File", "cleanup.ps1"],
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Kills any running Node.js processes (including MCP inspector).",
+            "presentation": {
+                "echo": false,
+                "reveal": "never",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
             "label": "build",
             "type": "shell",
             "command": "npx tsc",
@@ -9,8 +24,17 @@
                 "kind": "build",
                 "isDefault": true
             },
+            "dependsOn": "cleanup",
             "problemMatcher": ["$tsc"],
             "detail": "Compiles the TypeScript files."
+        },
+        {
+            "label": "build and inspect",
+            "dependsOrder": "sequence",
+            "dependsOn": ["cleanup", "build"],
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Cleans up processes, builds, then ready for inspector."
         }
     ]
 }

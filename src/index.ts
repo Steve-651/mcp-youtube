@@ -6,10 +6,29 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
+import { ToolRegistry } from './utils/toolDefinition.js';
+import { getAllTools, AppToolRegistry } from './tools/index.js';
+
+// Initialize tool registry with auto-discovered tools
+async function initializeToolRegistry() {
+  const tools = await getAllTools();
+  const toolRegistry = new ToolRegistry<AppToolRegistry>();
+  
+  // Register all discovered tools
+  tools.forEach(tool => {
+    toolRegistry.register(tool);
+  });
+  
+  console.error(`📦 Registered ${tools.length} tool(s): ${tools.map(t => t.name).join(', ')}`);
+  return toolRegistry;
+}
+
+const toolRegistry = await initializeToolRegistry();
 
 const server = new Server(
   {
-    name: 'mcp-youtube',
+    name: 'mcp-hello-world',
     version: '1.0.0',
   },
   {
@@ -21,46 +40,36 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: [
-      {
-        name: 'hello',
-        description: 'A simple hello world tool',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'Name to greet',
-            },
-          },
-        },
-      },
-    ],
+    tools: toolRegistry.getToolDefinitions(),
   };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (name === 'hello') {
-    const nameArg = args?.name || 'World';
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Hello, ${nameArg}! This is your MCP YouTube server.`,
-        },
-      ],
-    };
+  try {
+    // Type assertion for tool name - we validate it exists below
+    const toolName = name as keyof AppToolRegistry;
+    
+    // Check if tool exists
+    if (!toolRegistry.getToolNames().includes(toolName)) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+    
+    // Execute with strong typing - input/output automatically validated
+    return await toolRegistry.execute(toolName, args);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new Error(`Validation error: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
+    }
+    throw error;
   }
-
-  throw new Error(`Unknown tool: ${name}`);
 });
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('MCP YouTube server running on stdio');
+  console.error('MCP Hello World server running on stdio');
 }
 
 main().catch((error) => {

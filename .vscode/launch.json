@@ -6,7 +6,7 @@
             "request": "launch",
             "name": "Debug MCP Server with Inspector",
             "runtimeExecutable": "npx",
-            "runtimeArgs": ["@modelcontextprotocol/inspector", "node", "dist/server.js"],
+            "runtimeArgs": ["@modelcontextprotocol/inspector", "node", "dist/index.js"],
             "preLaunchTask": "build",
             "cwd": "${workspaceFolder}",
             "outFiles": ["${workspaceFolder}/dist/**/*.js"],

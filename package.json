@@ -2,15 +2,19 @@
   "name": "mcp-server",
   "version": "1.0.0",
   "description": "A TypeScript MCP server implementation.",
-  "main": "dist/server.js",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "npx tsc",
-    "start": "node dist/server.js",
-    "debug": "node --inspect-brk dist/server.js",
-    "inspect": "npx @modelcontextprotocol/inspector dist/server.js"
+    "cleanup": "powershell -ExecutionPolicy Bypass -File cleanup.ps1",
+    "build": "npm run cleanup && npx tsc",
+    "start": "npm run build && node dist/index.js",
+    "debug": "npm run build && node --inspect-brk dist/index.js",
+    "inspect": "npm run cleanup && npx @modelcontextprotocol/inspector node dist/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.16.0"
+    "@modelcontextprotocol/sdk": "^1.16.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.16.2",
