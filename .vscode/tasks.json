@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "npx tsc",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$tsc"],
+            "detail": "Compiles the TypeScript files."
+        },
+        {
+            "label": "run server",
+            "type": "shell",
+            "command": "node dist/server.js",
+            "group": "build",
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "detail": "Runs the MCP server after building."
+        },
+        {
+            "label": "debug with inspector",
+            "type": "shell",
+            "command": "npx @modelcontextprotocol/inspector node dist/server.js",
+            "group": "build",
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "detail": "Runs the MCP server with the inspector for debugging.",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c", "start", "cmd", "/k"]
+                }
+            }
+        }
+    ]
+}
