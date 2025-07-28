@@ -4,7 +4,15 @@ import 'dotenv/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { Innertube } from 'youtubei.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+const execFileAsync = promisify(execFile);
+
+// Configuration
+const TRANSCRIPTS_FOLDER = process.env.TRANSCRIPTS_FOLDER || './transcripts';
 
 const mcpServer = new McpServer({
   name: 'mcp-youtube',
@@ -12,149 +20,128 @@ const mcpServer = new McpServer({
   title: 'YouTube Transcription MCP Server'
 });
 
-// Helper function to create authenticated Innertube client
-function createYouTubeClient() {
-  const sessionConfig: any = {
-    retrieve_player: false,
-    enable_session_cache: false // Disable caching to avoid stale sessions
-  };
-  
-  // Add authentication if environment variables are provided
-  if (process.env.YOUTUBE_COOKIE || process.env.YOUTUBE_VISITOR_DATA) {
-    sessionConfig.session = {};
-    
-    if (process.env.YOUTUBE_COOKIE) {
-      sessionConfig.session.cookie = process.env.YOUTUBE_COOKIE;
-    }
-    
-    if (process.env.YOUTUBE_VISITOR_DATA) {
-      sessionConfig.session.visitor_data = process.env.YOUTUBE_VISITOR_DATA;
-    }
-    
-    if (process.env.YOUTUBE_PO_TOKEN) {
-      sessionConfig.session.po_token = process.env.YOUTUBE_PO_TOKEN;
-    }
-    
-    console.error('Using authenticated YouTube session with enhanced config');
-  } else {
-    console.error('Using unauthenticated YouTube session - some videos may be unavailable');
+// Ensure transcripts folder exists
+async function ensureTranscriptsFolder() {
+  try {
+    await fs.mkdir(TRANSCRIPTS_FOLDER, { recursive: true });
+  } catch (error) {
+    console.error('Failed to create transcripts folder:', error);
   }
-  
-  return Innertube.create(sessionConfig);
 }
 
-// Simple tool registration using MCP SDK
-mcpServer.registerTool("hello", {
-  description: "Say hello with a personalized greeting",
-  inputSchema: {
-    name: z.string().optional().describe("Name to greet (optional)"),
-  },
-}, async ({ name }) => {
-  const greeting = name ? `Hello, ${name}!` : "Hello, World!";
-  return {
-    content: [
-      {
-        type: "text",
-        text: greeting,
-      },
-    ],
-  };
-});
-
 mcpServer.registerTool("transcribe_youtube", {
-  description: "Extract transcript from YouTube video using InnerTube API",
+  description: "Extract transcript from YouTube video with progress reporting and save to configurable folder",
   inputSchema: {
     url: z.string().describe("YouTube video URL"),
   },
-  outputSchema: {
-    success: z.literal(true),
-    video_id: z.string(),
-    title: z.string(),
-    uploader: z.string(),
-    duration: z.number().int().describe("seconds"),
-    url: z.string(),
-    transcript: z.array(
-      z.object({
-        start: z.number().int().describe("seconds"),
-        duration: z.number().int().describe("seconds"),
-        text: z.string(),
-      })
-    ),
-    metadata: z.object({
-      transcription_date: z.string().describe("ISO Datetime"),
-      source: z.enum(["youtube_innertube"]),
-      language: z.string(),
-      confidence: z.number().min(0).max(1)
-    })
-  },
 }, async ({ url }) => {
   try {
-    console.error(`Attempting to extract transcript from: ${url}`);
+    await ensureTranscriptsFolder();
     
-    // Try multiple approaches if the first fails
-    let youtube;
-    let info;
-    
+    // Extract video ID for file naming
+    let videoId = "UNKNOWN";
     try {
-      console.error('Trying with authenticated session...');
-      youtube = await createYouTubeClient();
-      info = await youtube.getInfo(url);
-    } catch (firstError) {
-      console.error('First attempt failed, trying without authentication...');
-      try {
-        youtube = await Innertube.create({
-          retrieve_player: false,
-          enable_session_cache: false
-        });
-        info = await youtube.getInfo(url);
-      } catch (secondError) {
-        console.error('Second attempt failed, trying with different client type...');
-        youtube = await Innertube.create({
-          retrieve_player: false,
-          enable_session_cache: false
-        });
-        info = await youtube.getInfo(url);
-      }
+      const urlObj = new URL(url);
+      videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop() || "UNKNOWN";
+    } catch (urlError) {
+      console.error('URL parsing error:', urlError);
     }
+
+    console.error("Starting YouTube transcript extraction...");
+
+    // First, get video metadata
+    console.error("Getting video metadata...");
+
+    const metadataArgs = [
+      '--dump-json',
+      '--no-download',
+      '--socket-timeout', '30',
+      url
+    ];
     
-    console.error(`Video info retrieved for: ${info.basic_info.title}`);
-    const title = info.basic_info.title ?? "TITLE NOT FOUND";
-    const uploader = info.basic_info.channel?.name ?? "CHANNEL NOT FOUND";
-    const videoId = info.basic_info.id ?? "VIDEO ID NOT FOUND";
-    const duration = info.basic_info.duration ?? 0;
+    const { stdout: metadataJson } = await execFileAsync('yt-dlp', metadataArgs, { timeout: 30000 });
+    const metadata = JSON.parse(metadataJson);
     
+    const actualVideoId = metadata.id || videoId;
+    const title = metadata.title || "TITLE NOT FOUND";
+    const uploader = metadata.uploader || metadata.channel || "UPLOADER NOT FOUND";
+    const duration = Math.floor(metadata.duration || 0);
+
+    console.error(`Found video: "${title}" by ${uploader}`);
+
+    // Now get subtitles/transcript
     let transcriptData: Array<{start: number, duration: number, text: string}> = [];
     let language = "unknown";
     
     try {
-      console.error('Attempting to get transcript...');
-      const transcript = await info.getTranscript();
-      console.error('Transcript object:', transcript);
-      
-      if (transcript && transcript.transcript && transcript.transcript.content && transcript.transcript.content.body) {
-        console.error('Found transcript data, processing segments...');
-        transcriptData = transcript.transcript.content.body.initial_segments.map((segment: any) => ({
-          start: Math.floor(parseInt(segment.start_ms) / 1000),
-          duration: Math.floor((parseInt(segment.end_ms) - parseInt(segment.start_ms)) / 1000),
-          text: segment.snippet.text
-        }));
-        language = transcript.selectedLanguage ?? "unknown";
-        console.error(`Processed ${transcriptData.length} transcript segments`);
-      } else {
-        console.error('Transcript structure not as expected:', {
-          hasTranscript: !!transcript,
-          hasTranscriptProperty: !!(transcript && transcript.transcript),
-          hasContent: !!(transcript && transcript.transcript && transcript.transcript.content),
-          hasBody: !!(transcript && transcript.transcript && transcript.transcript.content && transcript.transcript.content.body)
-        });
-      }
-    } catch (transcriptError) {
-      console.error('Transcript extraction failed:', transcriptError);
-    }
+      console.error("Extracting subtitles...");
 
+      const subtitleArgs = [
+        '--write-auto-subs',
+        '--write-subs',
+        '--sub-langs', 'en,en-US,en-GB',
+        '--sub-format', 'vtt',
+        '--skip-download',
+        '--socket-timeout', '30',
+        '--output', 'temp_%(id)s.%(ext)s',
+        url
+      ];
+      
+      await execFileAsync('yt-dlp', subtitleArgs, { timeout: 45000 });
+      
+      console.error("Processing subtitle file...");
+      
+      // Find and read the VTT file
+      const files = await fs.readdir('.');
+      const vttFile = files.find(f => f.startsWith(`temp_${actualVideoId}`) && f.endsWith('.vtt'));
+      
+      if (vttFile) {
+        const vttContent = await fs.readFile(vttFile, 'utf-8');
+        
+        // Parse VTT content
+        const lines = vttContent.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          
+          // Time line format: 00:00:00.000 --> 00:00:03.000
+          if (line.includes(' --> ')) {
+            const [startTime, endTime] = line.split(' --> ');
+            const start = parseVTTTime(startTime);
+            const end = parseVTTTime(endTime);
+            
+            // Get text from next non-empty lines
+            let textLines = [];
+            for (let j = i + 1; j < lines.length && lines[j].trim() !== ''; j++) {
+              if (!lines[j].includes(' --> ')) {
+                textLines.push(lines[j].trim());
+              }
+            }
+            
+            if (textLines.length > 0) {
+              transcriptData.push({
+                start: Math.floor(start),
+                duration: Math.floor(end - start),
+                text: textLines.join(' ').replace(/<[^>]*>/g, '') // Remove HTML tags
+              });
+            }
+          }
+        }
+        
+        // Clean up the temp file
+        await fs.unlink(vttFile);
+        language = "en"; // Default since we requested English
+      }
+      
+    } catch (subtitleError) {
+      console.error('Subtitle extraction failed:', subtitleError);
+    }
+    
+    console.error("Saving transcript to file...");
+    
     const structuredResult = {
       success: true as const,
-      video_id: videoId,
+      video_id: actualVideoId,
       title: title,
       uploader: uploader,
       duration: duration,
@@ -166,23 +153,35 @@ mcpServer.registerTool("transcribe_youtube", {
       }],
       metadata: {
         transcription_date: new Date().toISOString(),
-        source: "youtube_innertube" as const,
+        source: "yt_dlp" as const,
         language: language,
-        confidence: transcriptData.length > 0 ? 0.9 : 0.0
+        confidence: transcriptData.length > 0 ? 0.95 : 0.0
       }
     };
 
+    // Save transcript to file
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `${actualVideoId}_${timestamp}.json`;
+    const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
+    
+    await fs.writeFile(filepath, JSON.stringify(structuredResult, null, 2));
+    
+    console.error(`Transcript saved to ${filepath}`);
+
     return {
       content: [{
-        type: 'text',
-        text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptData.length} transcript segments.`
+        type: 'text' as const,
+        text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptData.length} transcript segments. Saved to: ${filepath}`
       }],
-      structuredContent: structuredResult
+      structuredContent: {
+        ...structuredResult,
+        resource_uri: `file://${path.resolve(filepath)}`
+      }
     };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('YouTube extraction error:', error);
+    console.error('yt-dlp extraction error:', error);
     
     // Try to extract video ID for debugging
     let videoId = "UNKNOWN";
@@ -193,48 +192,33 @@ mcpServer.registerTool("transcribe_youtube", {
       console.error('URL parsing error:', urlError);
     }
     
-    // Determine error type based on error message using switch-like logic
+    // Determine error type based on error message
     let errorType: "transcript_unavailable" | "rate_limited" | "private_video" | "invalid_url" | "region_restricted" | "age_restricted" | "unknown" = "unknown";
-    let message = "An unexpected error occurred while processing the video.";
-    let suggestedAction = "Try again with a different video or check if the video is publicly accessible.";
+    let message = "An unexpected error occurred while processing the video with yt-dlp.";
+    let suggestedAction = "Make sure yt-dlp is installed and accessible in your PATH.";
     
     const errorLower = errorMessage.toLowerCase();
     
     switch (true) {
-      case errorLower.includes("unavailable"):
+      case errorLower.includes("command not found") || errorLower.includes("enoent"):
+        errorType = "unknown";
+        message = "yt-dlp is not installed or not found in PATH.";
+        suggestedAction = "Install yt-dlp: pip install yt-dlp or download from GitHub releases.";
+        break;
+      case errorLower.includes("unavailable") || errorLower.includes("private"):
         errorType = "private_video";
-        message = "This video is unavailable. It may be private, deleted, or restricted in your region.";
-        suggestedAction = "Try a different public video that's available in your region.";
+        message = "This video is unavailable or private.";
+        suggestedAction = "Try a different public video.";
         break;
       case errorLower.includes("age") || errorLower.includes("sign"):
         errorType = "age_restricted";
-        message = "This video is age-restricted and requires authentication.";
-        suggestedAction = "Try a non-age-restricted video, or consider implementing authentication.";
-        break;
-      case errorLower.includes("region") || errorLower.includes("country"):
-        errorType = "region_restricted";
-        message = "This video is not available in your region.";
-        suggestedAction = "Try a video that's available globally.";
-        break;
-      case errorLower.includes("transcript") || errorLower.includes("caption"):
-        errorType = "transcript_unavailable";
-        message = "No transcript is available for this video.";
-        suggestedAction = "Try a video that has captions or subtitles enabled.";
-        break;
-      case errorLower.includes("rate") || errorLower.includes("limit"):
-        errorType = "rate_limited";
-        message = "YouTube API rate limit exceeded.";
-        suggestedAction = "Wait a few minutes before trying again.";
-        break;
-      case errorLower.includes("invalid") || errorLower.includes("url"):
-        errorType = "invalid_url";
-        message = "The provided URL is not a valid YouTube video URL.";
-        suggestedAction = "Check the URL format and try again.";
+        message = "This video is age-restricted.";
+        suggestedAction = "Try a non-age-restricted video.";
         break;
       default:
         errorType = "unknown";
-        message = "An unexpected error occurred while processing the video.";
-        suggestedAction = "Try again with a different video or check if the video is publicly accessible.";
+        message = "yt-dlp failed to process this video.";
+        suggestedAction = "Check if the URL is valid and the video is accessible.";
         break;
     }
     
@@ -250,6 +234,15 @@ mcpServer.registerTool("transcribe_youtube", {
     throw new Error(JSON.stringify(structuredError, null, 2));
   }
 });
+
+// Helper function to parse VTT time format (HH:MM:SS.mmm) to seconds
+function parseVTTTime(timeStr: string): number {
+  const parts = timeStr.split(':');
+  const hours = parseInt(parts[0]) || 0;
+  const minutes = parseInt(parts[1]) || 0;
+  const seconds = parseFloat(parts[2]) || 0;
+  return hours * 3600 + minutes * 60 + seconds;
+}
 
 async function main() {
   const transport = new StdioServerTransport();

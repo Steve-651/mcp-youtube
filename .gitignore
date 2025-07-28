@@ -1,5 +1,6 @@
 /node_modules
 /dist
+/my-transcripts
 package-lock.json
 nul
 .env
