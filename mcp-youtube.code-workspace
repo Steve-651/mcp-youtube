@@ -5,6 +5,7 @@
 		}
 	],
 	"settings": {
-		"chat.mcp.enabled": true
+		"chat.mcp.enabled": true,
+		"editor.formatOnSave": true
 	}
 }
