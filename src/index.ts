@@ -44,6 +44,31 @@ const TranscribeYouTubeSchema = z.object({
   url: z.string().describe("YouTube video URL"),
 });
 
+// Zod schema for transcript data structure
+const TranscriptSegmentSchema = z.object({
+  start: z.number().int().describe("Start time in seconds"),
+  duration: z.number().int().describe("Duration in seconds"),
+  text: z.string().describe("Transcript text"),
+});
+
+const TranscriptMetadataSchema = z.object({
+  transcription_date: z.string().describe("ISO datetime when transcript was created"),
+  source: z.enum(["yt_dlp"]).describe("Source of transcription"),
+  language: z.string().describe("Language of the transcript"),
+  confidence: z.number().min(0).max(1).describe("Confidence score of transcription"),
+});
+
+const TranscriptSchema = z.object({
+  success: z.literal(true),
+  video_id: z.string().describe("YouTube video ID"),
+  title: z.string().describe("Video title"),
+  uploader: z.string().describe("Channel/uploader name"),
+  duration: z.number().int().describe("Video duration in seconds"),
+  url: z.string().describe("Original YouTube URL"),
+  transcript: z.array(TranscriptSegmentSchema).describe("Array of transcript segments"),
+  metadata: TranscriptMetadataSchema,
+});
+
 // Tool names enum
 enum ToolName {
   TRANSCRIBE_YOUTUBE = "transcribe_youtube",
@@ -280,13 +305,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
 
       // Save transcript to file
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${actualVideoId}_${timestamp}.json`;
+      const filename = `${actualVideoId}.json`;
       const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
 
       await fs.writeFile(filepath, JSON.stringify(structuredResult, null, 2));
 
       console.error(`Transcript saved to ${filepath}`);
+
+      // Add the new transcript as a discoverable resource
+      await addTranscriptResource(filepath, structuredResult);
 
       // Final progress notification
       if (progressToken !== undefined) {
@@ -371,30 +398,78 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error(`Unknown tool: ${name}`);
 });
 
-const ALL_RESOURCES: Resource[] = Array.from({ length: 100 }, (_, i) => {
-  const uri = `test://static/resource/${i + 1}`;
-  if (i % 2 === 0) {
-    return {
-      uri,
-      name: `Resource ${i + 1}`,
-      mimeType: "text/plain",
-      text: `Resource ${i + 1}: This is a plaintext resource`,
-    };
-  } else {
-    const buffer = Buffer.from(`Resource ${i + 1}: This is a base64 blob`);
-    return {
-      uri,
-      name: `Resource ${i + 1}`,
-      mimeType: "application/octet-stream",
-      blob: buffer.toString("base64"),
-    };
-  }
-});
+// Dynamic resource list for transcript files
+let TRANSCRIPT_RESOURCES: Resource[] = [];
 
 const PAGE_SIZE = 10;
 
+// Load existing transcript files as resources
+async function loadTranscriptResources() {
+  try {
+    await ensureTranscriptsFolder();
+    const files = await fs.readdir(TRANSCRIPTS_FOLDER);
+    const jsonFiles = files.filter(file => file.endsWith('.json'));
+
+    TRANSCRIPT_RESOURCES = [];
+
+    for (const file of jsonFiles) {
+      const filepath = path.join(TRANSCRIPTS_FOLDER, file);
+      try {
+        const content = await fs.readFile(filepath, 'utf-8');
+        const transcriptData = JSON.parse(content);
+
+        const resource: Resource = {
+          uri: `file://${path.resolve(filepath)}`,
+          name: `${transcriptData.title || 'Unknown Video'} - Transcript`,
+          description: `YouTube transcript from ${transcriptData.uploader || 'Unknown'} (${transcriptData.video_id})`,
+          mimeType: "application/json",
+        };
+
+        TRANSCRIPT_RESOURCES.push(resource);
+      } catch (error) {
+        console.error(`Failed to load transcript resource ${file}:`, error);
+      }
+    }
+
+    console.error(`Loaded ${TRANSCRIPT_RESOURCES.length} transcript resources`);
+  } catch (error) {
+    console.error('Failed to load transcript resources:', error);
+  }
+}
+
+// Add or update a transcript resource when one is created
+async function addTranscriptResource(filepath: string, transcriptData: any) {
+  const resourceUri = `file://${path.resolve(filepath)}`;
+  const resource: Resource = {
+    uri: resourceUri,
+    name: `${transcriptData.title || 'Unknown Video'} - Transcript`,
+    description: `YouTube transcript from ${transcriptData.uploader || 'Unknown'} (${transcriptData.video_id})`,
+    mimeType: "application/json",
+  };
+
+  // Check if resource already exists and update it, otherwise add new
+  const existingIndex = TRANSCRIPT_RESOURCES.findIndex(r => r.uri === resourceUri);
+  if (existingIndex >= 0) {
+    TRANSCRIPT_RESOURCES[existingIndex] = resource;
+    console.error(`Updated transcript resource: ${resource.name}`);
+  } else {
+    TRANSCRIPT_RESOURCES.push(resource);
+    console.error(`Added transcript resource: ${resource.name}`);
+  }
+
+  // Notify clients that the resource list has changed
+  try {
+    await server.sendResourceListChanged();
+  } catch (error) {
+    console.error('Failed to send resource list changed notification:', error);
+  }
+}
+
 // List resources handler
 server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+  // Refresh the resources
+  await loadTranscriptResources();
+
   const cursor = request.params?.cursor;
   let startIndex = 0;
 
@@ -405,11 +480,11 @@ server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
     }
   }
 
-  const endIndex = Math.min(startIndex + PAGE_SIZE, ALL_RESOURCES.length);
-  const resources = ALL_RESOURCES.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + PAGE_SIZE, TRANSCRIPT_RESOURCES.length);
+  const resources = TRANSCRIPT_RESOURCES.slice(startIndex, endIndex);
 
   let nextCursor: string | undefined;
-  if (endIndex < ALL_RESOURCES.length) {
+  if (endIndex < TRANSCRIPT_RESOURCES.length) {
     nextCursor = btoa(endIndex.toString());
   }
 
@@ -422,7 +497,15 @@ server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
 // List resource templates handler
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
   return {
-    resourceTemplates: [],
+    resourceTemplates: [
+      {
+        uriTemplate: `file://${path.resolve(TRANSCRIPTS_FOLDER)}/{video_id}.json`,
+        name: "YouTube Transcript",
+        description: "JSON file containing YouTube video transcript data with metadata",
+        mimeType: "application/json",
+        schema: zodToJsonSchema(TranscriptSchema),
+      },
+    ],
   };
 });
 
@@ -437,8 +520,9 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
 
-  // Check if this is a transcript file resource
-  if (uri.startsWith('file://') && uri.includes(TRANSCRIPTS_FOLDER)) {
+  // Check if this is a transcript file resource by looking at our resource list
+  const resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
+  if (resource && uri.startsWith('file://')) {
     try {
       const filePath = uri.replace('file://', '');
       const content = await fs.readFile(filePath, 'utf-8');
@@ -471,6 +555,9 @@ function parseVTTTime(timeStr: string): number {
 }
 
 async function main() {
+  // Load existing transcript files as resources
+  await loadTranscriptResources();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('MCP YouTube server running on stdio');
