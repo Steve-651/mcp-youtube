@@ -520,8 +520,29 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
 
-  // Check if this is a transcript file resource by looking at our resource list
-  const resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
+  console.error(`ReadResource request for URI: ${uri}`);
+
+  // Check if this is a transcript file resource by looking at our resource list first
+  let resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
+  
+  // If not found in our list, check if it's a valid transcript file path
+  if (!resource && uri.startsWith('file://')) {
+    const filePath = uri.replace('file://', '');
+    const resolvedTranscriptsFolder = path.resolve(TRANSCRIPTS_FOLDER);
+    
+    // Check if the file is in our transcripts folder and exists
+    if (filePath.startsWith(resolvedTranscriptsFolder) && filePath.endsWith('.json')) {
+      try {
+        await fs.access(filePath); // Check if file exists
+        console.error(`Found transcript file at: ${filePath}`);
+        // Create a temporary resource entry for this file
+        resource = { uri, name: 'Transcript File', mimeType: 'application/json' };
+      } catch (error) {
+        console.error(`File not found: ${filePath}`);
+      }
+    }
+  }
+
   if (resource && uri.startsWith('file://')) {
     try {
       const filePath = uri.replace('file://', '');
