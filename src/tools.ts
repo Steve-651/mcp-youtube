@@ -2,35 +2,19 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { execFile } from "child_process";
-import path from "path";
-import { promisify } from "util";
 import zodToJsonSchema from "zod-to-json-schema";
-import { TRANSCRIPTS_FOLDER } from "./config.js";
-import { addTranscriptResource } from "./resources.js";
-import { 
-  ToolName, 
-  ToolTranscribeYoutubeInputSchema, 
-  ToolGetTranscriptInputSchema, 
-  ToolGetTranscriptOutputSchema
-} from "./types/index.js";
-import { promises as fs } from 'fs';
+import {
+  ToolName,
+  ToolTranscribeYoutubeInputSchema,
+  ToolGetTranscriptInputSchema,
+  ToolGetTranscriptOutput,
+  ToolTranscribeYoutubeOutput
+} from "./types/tools.js";
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { ensureTranscriptsFolder } from "./util.js";
-
-const execFileAsync = promisify(execFile);
-
-// Helper function to parse VTT time format (HH:MM:SS.mmm) to seconds
-function parseVTTTime(timeStr: string): number {
-  const parts = timeStr.split(':');
-  const hours = parseInt(parts[0]) || 0;
-  const minutes = parseInt(parts[1]) || 0;
-  const seconds = parseFloat(parts[2]) || 0;
-  return hours * 3600 + minutes * 60 + seconds;
-}
+import { getVideoMetadata, extractSubtitles, writeTranscriptFile, readTranscriptFile } from "./io.js";
 
 export default function registerTools(server: Server) {
-  console.error('Registering Tools...');
+  console.debug('Registering Tools...');
 
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -52,9 +36,9 @@ export default function registerTools(server: Server) {
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+    const { name: action, arguments: args } = request.params;
 
-    if (name === ToolName.TRANSCRIBE_YOUTUBE) {
+    if (action === ToolName.TRANSCRIBE_YOUTUBE) {
       const validatedArgs = ToolTranscribeYoutubeInputSchema.parse(args);
       const { url } = validatedArgs;
 
@@ -62,190 +46,81 @@ export default function registerTools(server: Server) {
       const progressToken = request.params._meta?.progressToken;
 
       try {
-        await ensureTranscriptsFolder();
 
-        // Extract video ID for file naming
-        let videoId = "UNKNOWN";
-        try {
-          const urlObj = new URL(url);
-          videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop() || "UNKNOWN";
-        } catch (urlError) {
-          console.error('URL parsing error:', urlError);
-        }
-
-        console.error("Starting YouTube transcript extraction...");
-
-        // Send initial progress notification
         if (progressToken !== undefined) {
           await server.notification({
             method: "notifications/progress",
             params: {
               progress: 0,
-              total: 100,
-              progressToken,
-              message: "Starting YouTube transcript extraction..."
-            },
-          });
-        }
-
-        // First, get video metadata
-        console.error("Getting video metadata...");
-
-        if (progressToken !== undefined) {
-          await server.notification({
-            method: "notifications/progress",
-            params: {
-              progress: 10,
-              total: 100,
+              total: 4,
               progressToken,
               message: "Getting video metadata..."
             },
           });
         }
 
-        const metadataArgs = [
-          '--dump-json',
-          '--no-download',
-          '--socket-timeout', '30',
-          url
-        ];
-
-        const { stdout: metadataJson } = await execFileAsync('yt-dlp', metadataArgs, { timeout: 30000 });
-        const metadata = JSON.parse(metadataJson);
-
-        const actualVideoId = metadata.id || videoId;
-        const title = metadata.title || "TITLE NOT FOUND";
-        const uploader = metadata.uploader || metadata.channel || "UPLOADER NOT FOUND";
-        const duration = Math.floor(metadata.duration || 0);
-
-        console.error(`Found video: "${title}" by ${uploader}`);
+        const metadata = await getVideoMetadata(url);
+        const actualVideoId = metadata.id;
+        const title = metadata.title;
+        const uploader = metadata.uploader;
+        const duration = metadata.duration;
 
         if (progressToken !== undefined) {
           await server.notification({
             method: "notifications/progress",
             params: {
-              progress: 30,
-              total: 100,
+              progress: 1,
+              total: 4,
               progressToken,
               message: `Found video: "${title}" by ${uploader}`
             },
           });
         }
 
-        // Now get subtitles/transcript
-        let transcriptData: Array<{ start: number, duration: number, text: string }> = [];
+        let transcriptSegments: Array<{ start: number, duration: number, text: string }> = [];
         let language = "unknown";
 
+        // Now get subtitles/transcript
         try {
-          console.error("Extracting subtitles...");
-
           if (progressToken !== undefined) {
             await server.notification({
               method: "notifications/progress",
               params: {
-                progress: 50,
-                total: 100,
+                progress: 2,
+                total: 4,
                 progressToken,
                 message: "Extracting subtitles..."
               },
             });
           }
 
-          const subtitleArgs = [
-            '--write-auto-subs',
-            '--write-subs',
-            '--sub-langs', 'en,en-US,en-GB',
-            '--sub-format', 'vtt',
-            '--skip-download',
-            '--socket-timeout', '30',
-            '--output', 'temp_%(id)s.%(ext)s',
-            url
-          ];
-
-          await execFileAsync('yt-dlp', subtitleArgs, { timeout: 45000 });
-
-          console.error("Processing subtitle file...");
-
-          if (progressToken !== undefined) {
-            await server.notification({
-              method: "notifications/progress",
-              params: {
-                progress: 70,
-                total: 100,
-                progressToken,
-                message: "Processing subtitle file..."
-              },
-            });
-          }
-
-          // Find and read the VTT file
-          const files = await fs.readdir('.');
-          const vttFile = files.find(f => f.startsWith(`temp_${actualVideoId}`) && f.endsWith('.vtt'));
-
-          if (vttFile) {
-            const vttContent = await fs.readFile(vttFile, 'utf-8');
-
-            // Parse VTT content
-            const lines = vttContent.split('\n');
-
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i].trim();
-
-              // Time line format: 00:00:00.000 --> 00:00:03.000
-              if (line.includes(' --> ')) {
-                const [startTime, endTime] = line.split(' --> ');
-                const start = parseVTTTime(startTime);
-                const end = parseVTTTime(endTime);
-
-                // Get text from next non-empty lines
-                let textLines = [];
-                for (let j = i + 1; j < lines.length && lines[j].trim() !== ''; j++) {
-                  if (!lines[j].includes(' --> ')) {
-                    textLines.push(lines[j].trim());
-                  }
-                }
-
-                if (textLines.length > 0) {
-                  transcriptData.push({
-                    start: Math.floor(start),
-                    duration: Math.floor(end - start),
-                    text: textLines.join(' ').replace(/<[^>]*>/g, '') // Remove HTML tags
-                  });
-                }
-              }
-            }
-
-            // Clean up the temp file
-            await fs.unlink(vttFile);
-            language = "en"; // Default since we requested English
-          }
+          const subtitleResult = await extractSubtitles(url, actualVideoId);
+          transcriptSegments = subtitleResult.transcriptSegments;
+          language = subtitleResult.language;
 
         } catch (subtitleError) {
           console.error('Subtitle extraction failed:', subtitleError);
         }
 
-        console.error("Saving transcript to file...");
-
         if (progressToken !== undefined) {
           await server.notification({
             method: "notifications/progress",
             params: {
-              progress: 85,
-              total: 100,
+              progress: 3,
+              total: 4,
               progressToken,
               message: "Saving transcript to file..."
             },
           });
         }
 
-        const structuredResult = {
-          success: true as const,
+        const transcriptData: ToolGetTranscriptOutput = {
           video_id: actualVideoId,
           title: title,
           uploader: uploader,
           duration: duration,
           url: url,
-          transcript: transcriptData.length > 0 ? transcriptData : [{
+          transcript: transcriptSegments.length > 0 ? transcriptSegments : [{
             start: 0,
             duration: 0,
             text: "No transcript available for this video"
@@ -254,55 +129,45 @@ export default function registerTools(server: Server) {
             transcription_date: new Date().toISOString(),
             source: "yt_dlp" as const,
             language: language,
-            confidence: transcriptData.length > 0 ? 0.95 : 0.0
+            confidence: transcriptSegments.length > 0 ? 0.95 : 0.0 // whar
           }
         };
 
-        // Save transcript to file
-        const filename = `${actualVideoId}.json`;
-        const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
-
-        await fs.writeFile(filepath, JSON.stringify(structuredResult, null, 2));
-
-        console.error(`Transcript saved to ${filepath}`);
-
-        // Add the new transcript as a discoverable resource
-        await addTranscriptResource(server, filepath, structuredResult);
+        // Save transcript to file using resource function (automatically adds to resource list)
+        const filepath = await writeTranscriptFile(actualVideoId, transcriptData);
 
         // Final progress notification
         if (progressToken !== undefined) {
           await server.notification({
             method: "notifications/progress",
             params: {
-              progress: 100,
-              total: 100,
+              progress: 4,
+              total: 4,
               progressToken,
               message: `Transcript saved to ${filepath}`
             },
           });
         }
 
+        const transcriptionResult: ToolTranscribeYoutubeOutput = {
+          video_id: actualVideoId,
+          title: title,
+          uploader: uploader,
+          transcript_segments_count: transcriptSegments.length,
+          next_action: {
+            tool: ToolName.GET_TRANSCRIPT,
+            parameters: {
+              videoId: actualVideoId
+            }
+          }
+        };
+
         return {
           content: [{
             type: 'text' as const,
-            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptData.length} transcript segments.\n\nTo access the full transcript data, use the get_transcript tool with videoId: "${actualVideoId}"`
+            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptSegments.length} transcript segments.\n\nTo access the full transcript data, use the get_transcript tool with videoId: "${actualVideoId}"`
           }],
-          structuredContent: {
-            success: true,
-            video_id: actualVideoId,
-            title: title,
-            uploader: uploader,
-            duration: duration,
-            url: url,
-            transcript_segments_count: transcriptData.length,
-            next_action: {
-              tool: "get_transcript",
-              parameters: {
-                videoId: actualVideoId
-              }
-            },
-            saved_at: filepath
-          }
+          structuredContent: transcriptionResult
         };
 
       } catch (error) {
@@ -357,44 +222,19 @@ export default function registerTools(server: Server) {
           original_error: errorMessage
         };
 
+        console.error(structuredError);
         throw new Error(JSON.stringify(structuredError, null, 2));
       }
     }
 
-    if (name === ToolName.GET_TRANSCRIPT) {
+    if (action === ToolName.GET_TRANSCRIPT) {
       const validatedArgs = ToolGetTranscriptInputSchema.parse(args);
       const { videoId } = validatedArgs;
 
       try {
-        // Check if transcript file exists
-        const filename = `${videoId}.json`;
-        const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
+        // Read transcript using resource function
+        const transcriptData = await readTranscriptFile(videoId);
 
-        try {
-          await fs.access(filepath);
-        } catch {
-          throw new Error(`No transcript found for video ID: ${videoId}`);
-        }
-
-        // Read and parse the transcript file
-        const content = await fs.readFile(filepath, 'utf-8');
-        
-        // First parse JSON, then validate with Zod
-        let jsonData;
-        try {
-          jsonData = JSON.parse(content);
-        } catch (parseError) {
-          throw new Error(`Invalid JSON in transcript file: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
-        }
-
-        const transcriptParseResult = ToolGetTranscriptOutputSchema.safeParse(jsonData);
-
-        if (!transcriptParseResult.success) {
-          console.error('Transcript validation error:', transcriptParseResult.error);
-          throw new Error("Invalid transcript file format.");
-        }
-
-        const transcriptData = transcriptParseResult.data;
         return {
           content: [{
             type: 'text' as const,
@@ -405,15 +245,19 @@ export default function registerTools(server: Server) {
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        throw new Error(JSON.stringify({
+
+        const structuredError = {
           error_type: "transcript_not_found",
           message: errorMessage,
           video_id: videoId,
           suggested_action: "Use transcribe_youtube tool to create a transcript for this video first"
-        }, null, 2));
+        };
+
+        console.error(structuredError);
+        throw new Error(JSON.stringify(structuredError, null, 2));
       }
     }
 
-    throw new Error(`Unknown tool: ${name}`);
+    throw new Error(`Unknown tool: ${action}`);
   });
 }

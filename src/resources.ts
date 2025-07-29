@@ -7,10 +7,9 @@ import {
 import path from "path";
 import zodToJsonSchema from "zod-to-json-schema";
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { ToolGetTranscriptOutputSchema, TranscriptData } from "./types/index.js";
+import { ToolGetTranscriptOutputSchema } from "./types/tools.js";
+import { readTranscriptFile, listTranscriptFiles, transcriptFileExists } from "./io.js";
 import { TRANSCRIPTS_FOLDER } from "./config.js";
-import { promises as fs } from 'fs';
-import { ensureTranscriptsFolder } from "./util.js";
 
 // Dynamic resource list for transcript files
 let TRANSCRIPT_RESOURCES: Resource[] = [];
@@ -20,17 +19,14 @@ const PAGE_SIZE = 10;
 // Load existing transcript files as resources
 async function loadTranscriptResources() {
   try {
-    await ensureTranscriptsFolder();
-    const files = await fs.readdir(TRANSCRIPTS_FOLDER);
-    const jsonFiles = files.filter(file => file.endsWith('.json'));
+    const jsonFiles = await listTranscriptFiles();
 
     TRANSCRIPT_RESOURCES = [];
 
     for (const file of jsonFiles) {
       const filepath = path.join(TRANSCRIPTS_FOLDER, file);
       try {
-        const content = await fs.readFile(filepath, 'utf-8');
-        const transcriptData = JSON.parse(content);
+        const transcriptData = await readTranscriptFile(path.basename(file, '.json'));
 
         const resource: Resource = {
           uri: `file://${path.resolve(filepath)}`,
@@ -45,45 +41,17 @@ async function loadTranscriptResources() {
       }
     }
 
-    console.error(`Loaded ${TRANSCRIPT_RESOURCES.length} transcript resources`);
+    console.debug(`Loaded ${TRANSCRIPT_RESOURCES.length} transcript resources`);
   } catch (error) {
     console.error('Failed to load transcript resources:', error);
   }
 }
 
-// Add or update a transcript resource when one is created
-export async function addTranscriptResource(server: Server, filepath: string, transcriptData: TranscriptData) {
-  const resourceUri = `file://${path.resolve(filepath)}`;
-  const resource: Resource = {
-    uri: resourceUri,
-    name: `${transcriptData.title || 'Unknown Video'} - Transcript`,
-    description: `YouTube transcript from ${transcriptData.uploader || 'Unknown'} (${transcriptData.video_id})`,
-    mimeType: "application/json",
-  };
-
-  // Check if resource already exists and update it, otherwise add new
-  const existingIndex = TRANSCRIPT_RESOURCES.findIndex(r => r.uri === resourceUri);
-  if (existingIndex >= 0) {
-    TRANSCRIPT_RESOURCES[existingIndex] = resource;
-    console.error(`Updated transcript resource: ${resource.name}`);
-  } else {
-    TRANSCRIPT_RESOURCES.push(resource);
-    console.error(`Added transcript resource: ${resource.name}`);
-  }
-
-  // Notify clients that the resource list has changed
-  try {
-    await server.sendResourceListChanged();
-  } catch (error) {
-    console.error('Failed to send resource list changed notification:', error);
-  }
-}
-
 export default function registerResources(server: Server) {
-  console.error('Registering Resources...');
+  console.debug('Registering Resources...');
 
   // Load existing files as resources (async, but don't block registration)
-  loadTranscriptResources().catch(error => 
+  loadTranscriptResources().catch(error =>
     console.error('Failed to load initial transcript resources:', error)
   );
 
@@ -135,7 +103,7 @@ export default function registerResources(server: Server) {
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
 
-    console.error(`ReadResource request for URI: ${uri}`);
+    console.debug(`ReadResource request for URI: ${uri}`);
 
     // Check if this is a transcript file resource by looking at our resource list first
     let resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
@@ -148,10 +116,14 @@ export default function registerResources(server: Server) {
       // Check if the file is in our transcripts folder and exists
       if (filePath.startsWith(resolvedTranscriptsFolder) && filePath.endsWith('.json')) {
         try {
-          await fs.access(filePath); // Check if file exists
-          console.error(`Found transcript file at: ${filePath}`);
-          // Create a temporary resource entry for this file
-          resource = { uri, name: 'Transcript File', mimeType: 'application/json' };
+          const exists = await transcriptFileExists(path.basename(filePath, '.json'));
+          if (exists) {
+            console.debug(`Found transcript file at: ${filePath}`);
+            // Create a temporary resource entry for this file
+            resource = { uri, name: 'Transcript File', mimeType: 'application/json' };
+          } else {
+            console.error(`File not found: ${filePath}`);
+          }
         } catch (error) {
           console.error(`File not found: ${filePath}`);
         }
@@ -161,8 +133,7 @@ export default function registerResources(server: Server) {
     if (resource && uri.startsWith('file://')) {
       try {
         const filePath = uri.replace('file://', '');
-        const content = await fs.readFile(filePath, 'utf-8');
-        const transcriptData = JSON.parse(content);
+        const transcriptData = await readTranscriptFile(path.basename(filePath, '.json'));
 
         return {
           contents: [

@@ -1,4 +1,8 @@
 import z from "zod";
+import {
+  TranscriptMetadataSchema,
+  TranscriptSegmentSchema
+} from "./transcript.js";
 
 // Enums
 
@@ -6,21 +10,6 @@ export enum ToolName {
   TRANSCRIBE_YOUTUBE = "transcribe_youtube",
   GET_TRANSCRIPT = "get_transcript",
 }
-
-// Data structure schemas
-
-export const TranscriptSegmentSchema = z.object({
-  start: z.number().int().describe("Start time in seconds"),
-  duration: z.number().int().describe("Duration in seconds"),
-  text: z.string().describe("Transcript text"),
-});
-
-export const TranscriptMetadataSchema = z.object({
-  transcription_date: z.string().describe("ISO datetime when transcript was created"),
-  source: z.enum(["yt_dlp"]).describe("Source of transcription"),
-  language: z.string().describe("Language of the transcript"),
-  confidence: z.number().min(0).max(1).describe("Confidence score of transcription"),
-});
 
 // Tool input schemas
 
@@ -34,8 +23,18 @@ export const ToolGetTranscriptInputSchema = z.object({
 
 // Tool output schemas
 
+export const ToolTranscribeYoutubeOutputSchema = z.object({
+  video_id: z.string().describe("YouTube video ID"),
+  title: z.string().describe("Video title"),
+  uploader: z.string().describe("Channel/uploader name"),
+  transcript_segments_count: z.number().int(),
+  next_action: z.object({
+    tool: z.literal(ToolName.GET_TRANSCRIPT),
+    parameters: ToolGetTranscriptInputSchema
+  })
+});
+
 export const ToolGetTranscriptOutputSchema = z.object({
-  success: z.literal(true),
   video_id: z.string().describe("YouTube video ID"),
   title: z.string().describe("Video title"),
   uploader: z.string().describe("Channel/uploader name"),
@@ -47,4 +46,5 @@ export const ToolGetTranscriptOutputSchema = z.object({
 
 // Types
 
-export type TranscriptData = z.infer<typeof ToolGetTranscriptOutputSchema>;
+export interface ToolTranscribeYoutubeOutput extends z.infer<typeof ToolTranscribeYoutubeOutputSchema> { }
+export interface ToolGetTranscriptOutput extends z.infer<typeof ToolGetTranscriptOutputSchema> { }
