@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "A TypeScript MCP server implementation.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/mcp-youtube.js",
   "scripts": {
     "cleanup": "powershell -ExecutionPolicy Bypass -File cleanup.ps1",
-    "build": "npm run cleanup && npx tsc",
-    "start": "npm run build && node dist/index.js",
-    "debug": "npm run build && node --inspect-brk dist/index.js",
-    "inspect": "npm run cleanup && npx @modelcontextprotocol/inspector node dist/index.js"
+    "build": "npx tsc",
+    "start": "node dist/mcp-youtube.js",
+    "debug": "node --inspect-brk dist/mcp-youtube.js",
+    "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/mcp-youtube.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",

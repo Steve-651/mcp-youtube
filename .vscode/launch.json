@@ -6,10 +6,16 @@
             "request": "launch",
             "name": "Debug MCP Server with Inspector",
             "runtimeExecutable": "npx",
-            "runtimeArgs": ["@modelcontextprotocol/inspector", "node", "dist/index.js"],
+            "runtimeArgs": [
+                "@modelcontextprotocol/inspector",
+                "node",
+                "dist/mcp-youtube.js"
+            ],
             "preLaunchTask": "build",
             "cwd": "${workspaceFolder}",
-            "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.js"
+            ],
             "console": "integratedTerminal",
             "env": {
                 "NODE_ENV": "development",
