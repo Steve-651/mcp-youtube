@@ -1,14 +1,15 @@
+import { TranscriptSegment } from "./transcript";
+
 // External process execution functions
 export interface VideoMetadata {
   id: string;
   title: string;
   uploader: string;
   channel?: string;
-  duration: number;
+  duration: string;
 }
 
-
 export interface SubtitleExtractionResult {
-  transcriptSegments: Array<{ start: number, duration: number, text: string }>;
+  transcriptSegments: Array<TranscriptSegment>;
   language: string;
 }

@@ -41,7 +41,7 @@ export async function getVideoMetadata(url: string): Promise<VideoMetadata> {
     title: metadata.title || "TITLE NOT FOUND",
     uploader: metadata.uploader || metadata.channel || "UPLOADER NOT FOUND",
     channel: metadata.channel,
-    duration: Math.floor(metadata.duration || 0)
+    duration: secondsToVTTTime(Math.floor(metadata.duration || 0))
   };
 }
 
@@ -72,7 +72,7 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
   const files = await fs.readdir('.');
   const vttFile = files.find(f => f.startsWith(`temp_${videoId}`) && f.endsWith('.vtt'));
 
-  let transcriptSegments: Array<{ start: number, duration: number, text: string }> = [];
+  let transcriptSegments: Array<{ start_time: string, end_time: string, text: string }> = [];
   let language = "unknown";
 
   if (vttFile) {
@@ -86,9 +86,9 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
 
       // Time line format: 00:00:00.000 --> 00:00:03.000
       if (line.includes(' --> ')) {
-        const [startTime, endTime] = line.split(' --> ');
-        const start = parseVTTTime(startTime);
-        const end = parseVTTTime(endTime);
+        const [startTime, endTimeWithSettings] = line.split(' --> ');
+        // Strip VTT cue settings (align:start position:0% etc.) from end time
+        const endTime = endTimeWithSettings.split(' ')[0];
 
         // Get text from next non-empty lines
         let textLines = [];
@@ -99,11 +99,21 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
         }
 
         if (textLines.length > 0) {
-          transcriptSegments.push({
-            start: Math.floor(start),
-            duration: Math.floor(end - start),
-            text: textLines.join(' ').replace(/<[^>]*>/g, '') // Remove HTML tags
-          });
+          const cleanText = textLines.join(' ').replace(/<[^>]*>/g, ''); // Remove HTML tags
+          
+          // Calculate duration to filter out micro-segments (≤ 0.010 seconds)
+          const startSeconds = parseVTTTime(startTime.trim());
+          const endSeconds = parseVTTTime(endTime.trim());
+          const duration = endSeconds - startSeconds;
+          
+          // Only include segments longer than 0.010 seconds to avoid duplicates
+          if (duration > 0.010) {
+            transcriptSegments.push({
+              start_time: startTime.trim(),
+              end_time: endTime.trim(),
+              text: cleanText
+            });
+          }
         }
       }
     }
@@ -124,3 +134,13 @@ function parseVTTTime(timeStr: string): number {
   const seconds = parseFloat(parts[2]) || 0;
   return hours * 3600 + minutes * 60 + seconds;
 }
+
+// Helper function to convert seconds to VTT time format (HH:MM:SS.mmm)
+function secondsToVTTTime(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
+}
+

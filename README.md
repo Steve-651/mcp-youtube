@@ -2,6 +2,15 @@
 
 This project is a TypeScript implementation of a Minimal Communication Protocol (MCP) server. It is designed to download YouTube videos and provides utilities for AI understanding of the content. Current feature scope includes metadata, and transcriptions.
 
+## Transcript Format Notes
+
+The transcripts extracted from YouTube videos use the original VTT (WebVTT) timestamp format and preserve YouTube's auto-generated caption structure. This means:
+
+- Timestamps are in `HH:MM:SS.mmm` format (e.g., `"00:01:23.456"`)
+- Some segments may contain overlapping or duplicated text due to YouTube's captioning system creating "bridging" segments
+- This redundancy is intentionally preserved as it provides additional context and temporal precision that can be useful for LLM analysis
+- File sizes may be larger due to this redundancy, but the extra data helps maintain the complete temporal flow of speech
+
 ## Project Structure
 
 - `src/server.ts`: Main entry point for the MCP server. Initializes the server and listens for incoming connections.

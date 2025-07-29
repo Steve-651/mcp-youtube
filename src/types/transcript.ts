@@ -3,8 +3,8 @@ import z from "zod";
 // Data structure schemas
 
 export const TranscriptSegmentSchema = z.object({
-  start: z.number().int().describe("Start time in seconds"),
-  duration: z.number().int().describe("Duration in seconds"),
+  start_time: z.string().describe("Start timestamp in VTT format (HH:MM:SS.mmm)"),
+  end_time: z.string().describe("End timestamp in VTT format (HH:MM:SS.mmm)"),
   text: z.string().describe("Transcript text"),
 });
 
@@ -19,7 +19,7 @@ export const TranscriptSchema = z.object({
   video_id: z.string().describe("YouTube video ID"),
   title: z.string().describe("Video title"),
   uploader: z.string().describe("Channel/uploader name"),
-  duration: z.number().int().describe("Video duration in seconds"),
+  duration: z.string().describe("Video duration in VTT format (HH:MM:SS.mmm)"),
   url: z.string().describe("Original YouTube URL"),
   transcript: z.array(TranscriptSegmentSchema).describe("Array of transcript segments"),
   metadata: TranscriptMetadataSchema,

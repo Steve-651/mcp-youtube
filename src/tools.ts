@@ -79,7 +79,7 @@ export default function registerTools(server: Server) {
           });
         }
 
-        let transcriptSegments: Array<{ start: number, duration: number, text: string }> = [];
+        let transcriptSegments: Array<{ start_time: string, end_time: string, text: string }> = [];
         let language = "unknown";
 
         // Now get subtitles/transcript
@@ -123,8 +123,8 @@ export default function registerTools(server: Server) {
           duration: duration,
           url: url,
           transcript: transcriptSegments.length > 0 ? transcriptSegments : [{
-            start: 0,
-            duration: 0,
+            start_time: "00:00:00.000",
+            end_time: "00:00:00.000",
             text: "No transcript available for this video"
           }],
           metadata: {
