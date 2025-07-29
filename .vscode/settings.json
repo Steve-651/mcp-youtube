@@ -1,0 +1,10 @@
+{
+  "typescript.suggest.includeCompletionsForModuleExports": true,
+  "typescript.preferences.includeFileExtensionInImports": "on",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": [
+    "typescript"
+  ]
+}
