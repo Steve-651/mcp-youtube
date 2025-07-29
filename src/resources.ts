@@ -7,9 +7,9 @@ import {
 import path from "path";
 import zodToJsonSchema from "zod-to-json-schema";
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { ToolGetTranscriptOutputSchema } from "./types/tools.js";
 import { readTranscriptFile, listTranscriptFiles, transcriptFileExists } from "./io.js";
 import { TRANSCRIPTS_FOLDER } from "./config.js";
+import { TranscriptSchema } from "./types/transcript.js";
 
 // Dynamic resource list for transcript files
 let TRANSCRIPT_RESOURCES: Resource[] = [];
@@ -93,7 +93,7 @@ export default function registerResources(server: Server) {
           name: "YouTube Transcript",
           description: "JSON file containing YouTube video transcript data with metadata",
           mimeType: "application/json",
-          schema: zodToJsonSchema(ToolGetTranscriptOutputSchema),
+          schema: zodToJsonSchema(TranscriptSchema),
         },
       ],
     };

@@ -14,3 +14,17 @@ export const TranscriptMetadataSchema = z.object({
   language: z.string().describe("Language of the transcript"),
   confidence: z.number().min(0).max(1).describe("Confidence score of transcription"),
 });
+
+export const TranscriptSchema = z.object({
+  video_id: z.string().describe("YouTube video ID"),
+  title: z.string().describe("Video title"),
+  uploader: z.string().describe("Channel/uploader name"),
+  duration: z.number().int().describe("Video duration in seconds"),
+  url: z.string().describe("Original YouTube URL"),
+  transcript: z.array(TranscriptSegmentSchema).describe("Array of transcript segments"),
+  metadata: TranscriptMetadataSchema,
+});
+
+export interface TranscriptSegment extends z.infer<typeof TranscriptSegmentSchema> { }
+export interface TranscriptMetadata extends z.infer<typeof TranscriptMetadataSchema> { }
+export interface Transcript extends z.infer<typeof TranscriptSchema> { }

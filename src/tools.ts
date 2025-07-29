@@ -10,8 +10,11 @@ import {
   ToolGetTranscriptOutput,
   ToolTranscribeYoutubeOutput
 } from "./types/tools.js";
+import { handleError } from "./types/errors.js";
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { getVideoMetadata, extractSubtitles, writeTranscriptFile, readTranscriptFile } from "./io.js";
+import { getVideoMetadata, extractSubtitles } from "./ytdlp.js";
+import { writeTranscriptFile, readTranscriptFile } from "./io.js";
+import { Transcript } from "./types/transcript.js";
 
 export default function registerTools(server: Server) {
   console.debug('Registering Tools...');
@@ -114,7 +117,7 @@ export default function registerTools(server: Server) {
           });
         }
 
-        const transcriptData: ToolGetTranscriptOutput = {
+        const transcriptData: Transcript = {
           video_id: actualVideoId,
           title: title,
           uploader: uploader,
@@ -171,59 +174,7 @@ export default function registerTools(server: Server) {
         };
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        console.error('yt-dlp extraction error:', error);
-
-        // Try to extract video ID for debugging
-        let videoId = "UNKNOWN";
-        try {
-          const urlObj = new URL(url);
-          videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop() || "UNKNOWN";
-        } catch (urlError) {
-          console.error('URL parsing error:', urlError);
-        }
-
-        // Determine error type based on error message
-        let errorType: "transcript_unavailable" | "rate_limited" | "private_video" | "invalid_url" | "region_restricted" | "age_restricted" | "unknown" = "unknown";
-        let message = "An unexpected error occurred while processing the video with yt-dlp.";
-        let suggestedAction = "Make sure yt-dlp is installed and accessible in your PATH.";
-
-        const errorLower = errorMessage.toLowerCase();
-
-        switch (true) {
-          case errorLower.includes("command not found") || errorLower.includes("enoent"):
-            errorType = "unknown";
-            message = "yt-dlp is not installed or not found in PATH.";
-            suggestedAction = "Install yt-dlp: pip install yt-dlp or download from GitHub releases.";
-            break;
-          case errorLower.includes("unavailable") || errorLower.includes("private"):
-            errorType = "private_video";
-            message = "This video is unavailable or private.";
-            suggestedAction = "Try a different public video.";
-            break;
-          case errorLower.includes("age") || errorLower.includes("sign"):
-            errorType = "age_restricted";
-            message = "This video is age-restricted.";
-            suggestedAction = "Try a non-age-restricted video.";
-            break;
-          default:
-            errorType = "unknown";
-            message = "yt-dlp failed to process this video.";
-            suggestedAction = "Check if the URL is valid and the video is accessible.";
-            break;
-        }
-
-        // Throw structured error
-        const structuredError = {
-          error_type: errorType,
-          message: message,
-          video_id: videoId,
-          suggested_action: suggestedAction,
-          original_error: errorMessage
-        };
-
-        console.error(structuredError);
-        throw new Error(JSON.stringify(structuredError, null, 2));
+        handleError(error);
       }
     }
 
@@ -233,7 +184,7 @@ export default function registerTools(server: Server) {
 
       try {
         // Read transcript using resource function
-        const transcriptData = await readTranscriptFile(videoId);
+        const transcriptData: ToolGetTranscriptOutput = await readTranscriptFile(videoId);
 
         return {
           content: [{
@@ -244,17 +195,7 @@ export default function registerTools(server: Server) {
         };
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-
-        const structuredError = {
-          error_type: "transcript_not_found",
-          message: errorMessage,
-          video_id: videoId,
-          suggested_action: "Use transcribe_youtube tool to create a transcript for this video first"
-        };
-
-        console.error(structuredError);
-        throw new Error(JSON.stringify(structuredError, null, 2));
+        handleError(error);
       }
     }
 

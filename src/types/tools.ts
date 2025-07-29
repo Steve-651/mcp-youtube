@@ -1,7 +1,6 @@
 import z from "zod";
 import {
-  TranscriptMetadataSchema,
-  TranscriptSegmentSchema
+  TranscriptSchema
 } from "./transcript.js";
 
 // Enums
@@ -34,15 +33,7 @@ export const ToolTranscribeYoutubeOutputSchema = z.object({
   })
 });
 
-export const ToolGetTranscriptOutputSchema = z.object({
-  video_id: z.string().describe("YouTube video ID"),
-  title: z.string().describe("Video title"),
-  uploader: z.string().describe("Channel/uploader name"),
-  duration: z.number().int().describe("Video duration in seconds"),
-  url: z.string().describe("Original YouTube URL"),
-  transcript: z.array(TranscriptSegmentSchema).describe("Array of transcript segments"),
-  metadata: TranscriptMetadataSchema,
-});
+export const ToolGetTranscriptOutputSchema = TranscriptSchema.extend({});
 
 // Types
 
