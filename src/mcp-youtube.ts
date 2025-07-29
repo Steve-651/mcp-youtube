@@ -27,11 +27,8 @@ registerResources(server);
 registerTools(server);
 
 async function main() {
-  console.error('Beginning Main...');
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('MCP YouTube server running on stdio');
 }
 
 main().catch((error) => {

@@ -17,7 +17,6 @@ import { writeTranscriptFile, readTranscriptFile } from "./io.js";
 import { Transcript } from "./types/transcript.js";
 
 export default function registerTools(server: Server) {
-  console.debug('Registering Tools...');
 
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {

@@ -16,7 +16,6 @@ export async function writeTranscriptFile(videoId: string, transcriptData: ToolG
 
   await fs.writeJSON(filepath, transcriptData, TranscriptSchema);
 
-  console.debug(`Transcript saved to ${filepath}`);
   return filepath;
 }
 

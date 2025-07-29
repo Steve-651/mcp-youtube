@@ -37,23 +37,21 @@ async function loadTranscriptResources() {
 
         TRANSCRIPT_RESOURCES.push(resource);
       } catch (error) {
-        console.error(`Failed to load transcript resource ${file}:`, error);
+        // Silently skip failed resources
       }
     }
 
-    console.debug(`Loaded ${TRANSCRIPT_RESOURCES.length} transcript resources`);
   } catch (error) {
-    console.error('Failed to load transcript resources:', error);
+    // Silently handle resource loading errors
   }
 }
 
 export default function registerResources(server: Server) {
-  console.debug('Registering Resources...');
 
   // Load existing files as resources (async, but don't block registration)
-  loadTranscriptResources().catch(error =>
-    console.error('Failed to load initial transcript resources:', error)
-  );
+  loadTranscriptResources().catch(() => {
+    // Silently handle initial loading errors
+  });
 
   // List resources handler
   server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
@@ -103,7 +101,6 @@ export default function registerResources(server: Server) {
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
 
-    console.debug(`ReadResource request for URI: ${uri}`);
 
     // Check if this is a transcript file resource by looking at our resource list first
     let resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
@@ -118,14 +115,13 @@ export default function registerResources(server: Server) {
         try {
           const exists = await transcriptFileExists(path.basename(filePath, '.json'));
           if (exists) {
-            console.debug(`Found transcript file at: ${filePath}`);
             // Create a temporary resource entry for this file
             resource = { uri, name: 'Transcript File', mimeType: 'application/json' };
           } else {
-            console.error(`File not found: ${filePath}`);
+            // File not found - silently continue
           }
         } catch (error) {
-          console.error(`File not found: ${filePath}`);
+          // File access error - silently continue
         }
       }
     }
