@@ -7,7 +7,7 @@ import {
 import path from "path";
 import zodToJsonSchema from "zod-to-json-schema";
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { TranscriptSchema, TranscriptData } from "./types/index.js";
+import { ToolGetTranscriptOutputSchema, TranscriptData } from "./types/index.js";
 import { TRANSCRIPTS_FOLDER } from "./config.js";
 import { promises as fs } from 'fs';
 import { ensureTranscriptsFolder } from "./util.js";
@@ -82,8 +82,10 @@ export async function addTranscriptResource(server: Server, filepath: string, tr
 export default function registerResources(server: Server) {
   console.error('Registering Resources...');
 
-  // Load existing files as resources
-  // await loadTranscriptResources();
+  // Load existing files as resources (async, but don't block registration)
+  loadTranscriptResources().catch(error => 
+    console.error('Failed to load initial transcript resources:', error)
+  );
 
   // List resources handler
   server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
@@ -123,7 +125,7 @@ export default function registerResources(server: Server) {
           name: "YouTube Transcript",
           description: "JSON file containing YouTube video transcript data with metadata",
           mimeType: "application/json",
-          schema: zodToJsonSchema(TranscriptSchema),
+          schema: zodToJsonSchema(ToolGetTranscriptOutputSchema),
         },
       ],
     };

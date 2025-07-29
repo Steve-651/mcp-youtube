@@ -1,11 +1,14 @@
 import z from "zod";
 
-// Zod schema for transcribe_youtube tool
-export const TranscribeYouTubeSchema = z.object({
-  url: z.string().describe("YouTube video URL"),
-});
+// Enums
 
-// Zod schema for transcript data structure
+export enum ToolName {
+  TRANSCRIBE_YOUTUBE = "transcribe_youtube",
+  GET_TRANSCRIPT = "get_transcript",
+}
+
+// Data structure schemas
+
 export const TranscriptSegmentSchema = z.object({
   start: z.number().int().describe("Start time in seconds"),
   duration: z.number().int().describe("Duration in seconds"),
@@ -19,7 +22,19 @@ export const TranscriptMetadataSchema = z.object({
   confidence: z.number().min(0).max(1).describe("Confidence score of transcription"),
 });
 
-export const TranscriptSchema = z.object({
+// Tool input schemas
+
+export const ToolTranscribeYoutubeInputSchema = z.object({
+  url: z.string().describe("YouTube video URL"),
+});
+
+export const ToolGetTranscriptInputSchema = z.object({
+  videoId: z.string().describe("YouTube video ID"),
+});
+
+// Tool output schemas
+
+export const ToolGetTranscriptOutputSchema = z.object({
   success: z.literal(true),
   video_id: z.string().describe("YouTube video ID"),
   title: z.string().describe("Video title"),
@@ -30,10 +45,6 @@ export const TranscriptSchema = z.object({
   metadata: TranscriptMetadataSchema,
 });
 
-// TypeScript type inference from Zod schemas
-export type TranscriptData = z.infer<typeof TranscriptSchema>;
+// Types
 
-// Tool names enum
-export enum ToolName {
-  TRANSCRIBE_YOUTUBE = "transcribe_youtube",
-}
+export type TranscriptData = z.infer<typeof ToolGetTranscriptOutputSchema>;

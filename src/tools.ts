@@ -8,7 +8,12 @@ import { promisify } from "util";
 import zodToJsonSchema from "zod-to-json-schema";
 import { TRANSCRIPTS_FOLDER } from "./config.js";
 import { addTranscriptResource } from "./resources.js";
-import { ToolName, TranscribeYouTubeSchema } from "./types/index.js";
+import { 
+  ToolName, 
+  ToolTranscribeYoutubeInputSchema, 
+  ToolGetTranscriptInputSchema, 
+  ToolGetTranscriptOutputSchema
+} from "./types/index.js";
 import { promises as fs } from 'fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ensureTranscriptsFolder } from "./util.js";
@@ -34,7 +39,12 @@ export default function registerTools(server: Server) {
         {
           name: ToolName.TRANSCRIBE_YOUTUBE,
           description: "Extract transcript from YouTube video with progress reporting and save to configurable folder",
-          inputSchema: zodToJsonSchema(TranscribeYouTubeSchema),
+          inputSchema: zodToJsonSchema(ToolTranscribeYoutubeInputSchema),
+        },
+        {
+          name: ToolName.GET_TRANSCRIPT,
+          description: "Get existing transcript by video ID",
+          inputSchema: zodToJsonSchema(ToolGetTranscriptInputSchema),
         },
       ],
     };
@@ -45,7 +55,7 @@ export default function registerTools(server: Server) {
     const { name, arguments: args } = request.params;
 
     if (name === ToolName.TRANSCRIBE_YOUTUBE) {
-      const validatedArgs = TranscribeYouTubeSchema.parse(args);
+      const validatedArgs = ToolTranscribeYoutubeInputSchema.parse(args);
       const { url } = validatedArgs;
 
       // Extract progress token from request metadata
@@ -275,11 +285,23 @@ export default function registerTools(server: Server) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptData.length} transcript segments. Saved to: ${filepath}`
+            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptData.length} transcript segments.\n\nTo access the full transcript data, use the get_transcript tool with videoId: "${actualVideoId}"`
           }],
           structuredContent: {
-            ...structuredResult,
-            resource_uri: `file://${path.resolve(filepath)}`
+            success: true,
+            video_id: actualVideoId,
+            title: title,
+            uploader: uploader,
+            duration: duration,
+            url: url,
+            transcript_segments_count: transcriptData.length,
+            next_action: {
+              tool: "get_transcript",
+              parameters: {
+                videoId: actualVideoId
+              }
+            },
+            saved_at: filepath
           }
         };
 
@@ -336,6 +358,59 @@ export default function registerTools(server: Server) {
         };
 
         throw new Error(JSON.stringify(structuredError, null, 2));
+      }
+    }
+
+    if (name === ToolName.GET_TRANSCRIPT) {
+      const validatedArgs = ToolGetTranscriptInputSchema.parse(args);
+      const { videoId } = validatedArgs;
+
+      try {
+        // Check if transcript file exists
+        const filename = `${videoId}.json`;
+        const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
+
+        try {
+          await fs.access(filepath);
+        } catch {
+          throw new Error(`No transcript found for video ID: ${videoId}`);
+        }
+
+        // Read and parse the transcript file
+        const content = await fs.readFile(filepath, 'utf-8');
+        
+        // First parse JSON, then validate with Zod
+        let jsonData;
+        try {
+          jsonData = JSON.parse(content);
+        } catch (parseError) {
+          throw new Error(`Invalid JSON in transcript file: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
+        }
+
+        const transcriptParseResult = ToolGetTranscriptOutputSchema.safeParse(jsonData);
+
+        if (!transcriptParseResult.success) {
+          console.error('Transcript validation error:', transcriptParseResult.error);
+          throw new Error("Invalid transcript file format.");
+        }
+
+        const transcriptData = transcriptParseResult.data;
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Found transcript for "${transcriptData.title}" by ${transcriptData.uploader}. Contains ${transcriptData.transcript.length} transcript segments.`
+          }],
+          structuredContent: transcriptData
+        };
+
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        throw new Error(JSON.stringify({
+          error_type: "transcript_not_found",
+          message: errorMessage,
+          video_id: videoId,
+          suggested_action: "Use transcribe_youtube tool to create a transcript for this video first"
+        }, null, 2));
       }
     }
 
