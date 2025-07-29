@@ -15,9 +15,14 @@ const server = new Server({
   {
     capabilities: {
       prompts: {},
-      resources: { subscribe: true },
+      resources: {
+        subscribe: true,
+        listChanged: true
+      },
       tools: {},
-      logging: {},
+      logging: {
+
+      },
     },
   }
 );

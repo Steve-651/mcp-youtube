@@ -53,8 +53,8 @@ export default function registerTools(server: Server) {
           await server.notification({
             method: "notifications/progress",
             params: {
-              progress: 0,
-              total: 4,
+              progress: 1,
+              total: 3,
               progressToken,
               message: "Getting video metadata..."
             },
@@ -67,18 +67,6 @@ export default function registerTools(server: Server) {
         const uploader = metadata.uploader;
         const duration = metadata.duration;
 
-        if (progressToken !== undefined) {
-          await server.notification({
-            method: "notifications/progress",
-            params: {
-              progress: 1,
-              total: 4,
-              progressToken,
-              message: `Found video: "${title}" by ${uploader}`
-            },
-          });
-        }
-
         let transcriptSegments: Array<{ start_time: string, end_time: string, text: string }> = [];
         let language = "unknown";
 
@@ -89,9 +77,9 @@ export default function registerTools(server: Server) {
               method: "notifications/progress",
               params: {
                 progress: 2,
-                total: 4,
+                total: 3,
                 progressToken,
-                message: "Extracting subtitles..."
+                message: "Extracting transcript..."
               },
             });
           }
@@ -102,18 +90,6 @@ export default function registerTools(server: Server) {
 
         } catch (subtitleError) {
           console.error('Subtitle extraction failed:', subtitleError);
-        }
-
-        if (progressToken !== undefined) {
-          await server.notification({
-            method: "notifications/progress",
-            params: {
-              progress: 3,
-              total: 4,
-              progressToken,
-              message: "Saving transcript to file..."
-            },
-          });
         }
 
         const transcriptData: Transcript = {
@@ -136,15 +112,15 @@ export default function registerTools(server: Server) {
         };
 
         // Save transcript to file using resource function (automatically adds to resource list)
-        const filepath = await writeTranscriptFile(actualVideoId, transcriptData);
+        const filepath = await writeTranscriptFile(actualVideoId, transcriptData, server);
 
         // Final progress notification
         if (progressToken !== undefined) {
           await server.notification({
             method: "notifications/progress",
             params: {
-              progress: 4,
-              total: 4,
+              progress: 3,
+              total: 3,
               progressToken,
               message: `Transcript saved to ${filepath}`
             },
@@ -167,7 +143,7 @@ export default function registerTools(server: Server) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptSegments.length} transcript segments.\n\nTo access the full transcript data, use the get_transcript tool with videoId: "${actualVideoId}"`
+            text: `Successfully extracted transcript for "${title}" by ${uploader}. Found ${transcriptSegments.length} transcript segments.\n\nResource registered as "@file://${filepath}".\n\nUse @ mention to access the full transcript data.`
           }],
           structuredContent: transcriptionResult
         };
@@ -188,7 +164,7 @@ export default function registerTools(server: Server) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Found transcript for "${transcriptData.title}" by ${transcriptData.uploader}. Contains ${transcriptData.transcript.length} transcript segments.`
+            text: `Found transcript for "${transcriptData.title}" by ${transcriptData.uploader}.\n\n\`\`\`json\n${JSON.stringify(transcriptData, null, 2)}\n\`\`\``
           }],
           structuredContent: transcriptData
         };

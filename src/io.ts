@@ -6,15 +6,23 @@ import { TRANSCRIPTS_FOLDER } from "./config.js";
 import { TranscriptNotFoundError } from "./types/errors.js";
 import * as fs from "./fs.js";
 import { Transcript, TranscriptSchema } from "./types/transcript.js";
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 
 // File I/O functions (using fs.ts wrapper)
-export async function writeTranscriptFile(videoId: string, transcriptData: ToolGetTranscriptOutput): Promise<string> {
+export async function writeTranscriptFile(videoId: string, transcriptData: ToolGetTranscriptOutput, server?: Server): Promise<string> {
   await fs.mkdir(TRANSCRIPTS_FOLDER);
 
   const filename = `${videoId}.json`;
   const filepath = path.join(TRANSCRIPTS_FOLDER, filename);
 
   await fs.writeJSON(filepath, transcriptData, TranscriptSchema);
+
+  // Notify clients that the resource list has changed
+  if (server) {
+    await server.notification({
+      method: "notifications/resources/list_changed"
+    });
+  }
 
   return filepath;
 }
