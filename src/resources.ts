@@ -101,7 +101,6 @@ export default function registerResources(server: Server) {
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
 
-
     // Check if this is a transcript file resource by looking at our resource list first
     let resource = TRANSCRIPT_RESOURCES.find(r => r.uri === uri);
 

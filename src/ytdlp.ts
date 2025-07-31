@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { promises as fs } from 'fs';
+import * as fs from './fs.js';
 import { ExecError, YtDlpError } from "./types/errors.js";
 import { SubtitleExtractionResult, VideoMetadata } from "./types/tydlp.js";
 
@@ -69,14 +69,14 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
   }
 
   // Find and read the VTT file
-  const files = await fs.readdir('.');
+  const files = await fs.readDir('.');
   const vttFile = files.find(f => f.startsWith(`temp_${videoId}`) && f.endsWith('.vtt'));
 
   let transcriptSegments: Array<{ start_time: string, end_time: string, text: string }> = [];
-  let language = "unknown";
+  let language = "en"; // Default since we requested English
 
   if (vttFile) {
-    const vttContent = await fs.readFile(vttFile, 'utf-8');
+    const vttContent = await fs.readFile(vttFile);
 
     // Parse VTT content
     const lines = vttContent.split('\n');
@@ -99,15 +99,14 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
         }
 
         if (textLines.length > 0) {
-          const cleanText = textLines.join(' ').replace(/<[^>]*>/g, ''); // Remove HTML tags
-          
           // Calculate duration to filter out micro-segments (≤ 0.010 seconds)
           const startSeconds = parseVTTTime(startTime.trim());
           const endSeconds = parseVTTTime(endTime.trim());
           const duration = endSeconds - startSeconds;
-          
+
           // Only include segments longer than 0.010 seconds to avoid duplicates
           if (duration > 0.010) {
+            const cleanText = textLines.join(' ').replace(/<[^>]*>/g, ''); // Remove HTML tags
             transcriptSegments.push({
               start_time: startTime.trim(),
               end_time: endTime.trim(),
@@ -120,7 +119,6 @@ export async function extractSubtitles(url: string, videoId: string): Promise<Su
 
     // Clean up the temp file
     await fs.unlink(vttFile);
-    language = "en"; // Default since we requested English
   }
 
   return { transcriptSegments: transcriptSegments, language };
@@ -140,7 +138,7 @@ function secondsToVTTTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  
+
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
 }
 
